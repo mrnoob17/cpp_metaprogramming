@@ -48,6 +48,7 @@ struct Name
 template<typename T>
 struct Pointer_To_Member
 {
+    using Value_Type = T;
     constexpr Pointer_To_Member(const T t){
         type = t;
     }
@@ -57,6 +58,12 @@ struct Pointer_To_Member
 template<Pointer_To_Member U, Name n>
 struct Reflectable
 {
+    template<typename T>
+    constexpr auto& operator()(T& t)
+    {
+        return t.*type;
+    }
+
     static constexpr const decltype(U.type) type {U.type};
     static constexpr const char* name {n.cstr()};
 };
@@ -110,7 +117,7 @@ struct Members
     }
 
     template<Name N, typename T, typename ...Us>
-    constexpr auto by_name() const
+    constexpr auto by_name_helper() const
     {
         if constexpr (N == T{}.name){
             return T{}.type;
@@ -119,9 +126,15 @@ struct Members
         {
             return [this]<typename First, typename... Rest>(First f, Rest... r)
             {
-                return by_name<N, Rest...>();
-            }(Ts{}...);
+                return by_name_helper<N, Rest...>();
+            }(T{}, Us{}...);
         }
+    }
+
+    template<Name N>
+    constexpr auto by_name() const
+    {
+        return by_name_helper<N, Ts...>();
     }
 
     template<size_t I, size_t Current = 0>
@@ -150,14 +163,20 @@ struct Members
 
 #include <string>
 
-auto& reflective_get(auto& s, auto& t)
+constexpr auto& reflective_get(auto& s, auto& t)
 {
     return s.*t.type;
 }
 
-auto& for_each(auto& s, auto t)
+template<size_t index = 0>
+constexpr auto for_each(auto& s, auto t)
 {
-    s.members(s, t);
+    constexpr auto v {s.meta.members.template member_at<index>()};
+    t(s, v);
+
+    if constexpr(index + 1 < s.meta.members.length){
+        for_each<index + 1>(s, t);
+    }
 }
 
 template<typename T, Name N, typename ...Ts>
@@ -264,6 +283,16 @@ int main()
     f.position = {1, 2};
     f.heading = {6, 9};
     f.origin = {4, 20};
+
+    constexpr auto position {Foo::meta.members.by_name<"position">()};
+
+    for_each(f, [](auto& s, auto i)
+    {
+        auto& v {i(s)};
+        if constexpr(requires{v + 1;}){
+            printf("member %s has + operator\n", i.name);
+        }
+    });
 
     println(f);
 }
