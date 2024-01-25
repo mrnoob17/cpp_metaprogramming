@@ -36,47 +36,71 @@ struct Name
         }
         return true;
     }
+    constexpr const char* cstr() const
+    {
+        return data;
+    }
+
     static constexpr size_t len {N};
     char data[N];
 };
 
 template<typename T>
-struct Pointer
+struct Pointer_To_Member
 {
-    constexpr Pointer(const T t){
+    constexpr Pointer_To_Member(const T t){
         type = t;
     }
     T type;
 };
 
-template<Pointer U, Name n>
+template<Pointer_To_Member U, Name n>
 struct Reflectable
 {
-    constexpr auto type() const
-    {
-        return U.type;
-    }
-
-    constexpr const char* name() const
-    {
-        return n.data;
-    }
+    static constexpr const decltype(U.type) type {U.type};
+    static constexpr const char* name {n.cstr()};
 };
 
-struct Serializer
-{
-    template<typename T>
-    void operator()(const char* f, T& t) const
-    {
-    }
-};
-
-#define Reflect(b) Reflectable<&Struct_Type::b, #b>
-    
 template<typename ...Ts>
-struct Members
+constexpr bool no_duplicate_members()
 {
-    static constexpr const char* names[sizeof...(Ts)] {Ts{}.name()...};
+    constexpr const char* names[sizeof...(Ts)] {Ts{}.name...};
+
+    for(int i = 0; i < sizeof...(Ts); i++)
+    {
+        for(int j = 0; j < sizeof...(Ts); j++)
+        {
+            if(i != j)
+            {
+                for(auto a = names[i]; *a != 0; a++)
+                {
+                    auto not_equal {false};
+                    for(auto b = names[j]; *b != 0; b++)
+                    {
+                        if(*a != *b)
+                        {
+                            not_equal = true;
+                            break;
+                        }
+                    }
+                    if(!not_equal){
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+template<typename ...Ts> 
+struct Members 
+{
+    static constexpr const char* names[sizeof...(Ts)] {Ts{}.name...};
+
+    static_assert(no_duplicate_members<Ts...>(), "error when creating members meta data: list has duplicate members");
+
     static constexpr size_t length {sizeof...(Ts)};
 
     template<typename T, typename F>
@@ -88,8 +112,8 @@ struct Members
     template<Name N, typename T, typename ...Us>
     constexpr auto by_name() const
     {
-        if constexpr (N == T{}.name()){
-            return T{}.type();
+        if constexpr (N == T{}.name){
+            return T{}.type;
         }
         else
         {
@@ -100,13 +124,14 @@ struct Members
         }
     }
 
-    template<size_t I, size_t Counter = 0>
+    template<size_t I, size_t Current = 0>
     constexpr auto member_at() const
     {
+        static_assert(Current <= I, "member_at error : index out of bounds");
         return []<typename T, typename ...Us>(T t, Us... us)
         {
-            if constexpr(Counter != I){
-                return Members<Us...>{}.template member_at<I, Counter + 1>();
+            if constexpr(Current != I){
+                return Members<Us...>{}.template member_at<I, Current + 1>();
             }
             else{
                 return T{};
@@ -125,50 +150,48 @@ struct Members
 
 #include <string>
 
-
-auto& get(auto& s, auto& t)
+auto& reflective_get(auto& s, auto& t)
 {
-    return s.*t.type();
+    return s.*t.type;
 }
 
-auto& for_each(auto& s, auto& t)
+auto& for_each(auto& s, auto t)
 {
     s.members(s, t);
 }
 
+template<typename T, Name N, typename ...Ts>
+struct Reflect_Data
+{
+    using type = T;
+    static constexpr const char* name {N.cstr()};
+    Members<Ts...> members;
+};
+
+#define Reflect(name, ...) using meta_tag = name; static constexpr Reflect_Data<meta_tag, #name, __VA_ARGS__> meta{}
+
+#define Field(a) Reflectable<&meta_tag::a, #a>
+
 struct RGBA
 {
-    static constexpr const char* name {"RGBA"};
-
     float r {1};
     float g {3};
     float b {5};
     float a {7};
 
-
-    using Struct_Type = RGBA; 
-    static constexpr Members<Reflect(r),
-                             Reflect(g),
-                             Reflect(b),
-                             Reflect(a)> members;
+    Reflect(RGBA, Field(r), Field(g), Field(b), Field(a));
 };
 
 struct Vec
 {
-    static constexpr const char* name {"Vec"};
-
     float x {0};
     float y {0};
 
-    using Struct_Type = Vec; 
-    static constexpr Members<Reflect(x),
-                             Reflect(y)> members;
+    Reflect(Vec, Field(x), Field(y));
 };
 
 struct Foo
 {
-    static constexpr const char* name {"Foo"};
-
     int bar;
     int zed;
     float test;
@@ -180,30 +203,23 @@ struct Foo
     RGBA background;
     RGBA highlight;
 
-    using Struct_Type = Foo; 
-    static constexpr Members<Reflect(bar),
-                             Reflect(zed),
-                             Reflect(background),
-                             Reflect(highlight),
-                             Reflect(heading),
-                             Reflect(origin),
-                             Reflect(position)> members;
+    Reflect(Foo, Field(bar), Field(zed), Field(position), Field(heading), Field(origin), Field(background), Field(highlight));
 };
 
 template<size_t I = 0, bool Nested = false>
-void print(auto& s) requires requires {s.members;}
+void print(auto& s) requires requires {s.meta.members;}
 {
-    constexpr auto member {s.members.template member_at<I>()};
-    auto& v {get(s, member)};
+    constexpr auto member {s.meta.members.template member_at<I>()};
+    auto& v {reflective_get(s, member)};
 
     if constexpr(!Nested && I == 0){
-        printf("struct %s {", s.name);
+        printf("struct %s {", s.meta.name);
     }
-    if constexpr(requires{v.members;})
+    if constexpr(requires{v.meta.members;})
     {
-        printf("%s : {", member.name());
+        printf("%s : {", member.name);
         print<0, true>(v);
-        if constexpr(I + 1 < s.members.length)
+        if constexpr(I + 1 < s.meta.members.length)
         {
             printf("}\n");
             print<I + 1>(s);
@@ -214,16 +230,16 @@ void print(auto& s) requires requires {s.members;}
     }
     else
     {
-        if constexpr(I + 1 >= s.members.length){
-            printf("%s : %s", member.name(), std::to_string(v).c_str());
+        if constexpr(I + 1 >= s.meta.members.length){
+            printf("%s : %s", member.name, std::to_string(v).c_str());
         }
         else
         {
             if constexpr(Nested){
-                printf("%s : %s, ", member.name(), std::to_string(v).c_str());
+                printf("%s : %s, ", member.name, std::to_string(v).c_str());
             } 
             else{
-                printf("%s : %s,\n", member.name(), std::to_string(v).c_str());
+                printf("%s : %s,\n", member.name, std::to_string(v).c_str());
             } 
             print<I + 1, Nested>(s);
         }
@@ -233,7 +249,7 @@ void print(auto& s) requires requires {s.members;}
     }
 }
 
-void println(auto& s) requires requires {s.members;}
+void println(auto& s) requires requires {s.meta.members;}
 {
     print(s);
     printf("\n");
@@ -247,7 +263,7 @@ int main()
     f.zed = 1;
     f.position = {1, 2};
     f.heading = {6, 9};
-    f.origin= {4, 20};
+    f.origin = {4, 20};
 
     println(f);
 }
