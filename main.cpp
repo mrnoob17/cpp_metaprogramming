@@ -59,7 +59,7 @@ template<Pointer_To_Member U, Name n>
 struct Reflectable
 {
     template<typename T>
-    constexpr auto& operator()(T& t)
+    constexpr auto& operator()(T& t) const
     {
         return t.*type;
     }
@@ -229,7 +229,7 @@ template<size_t I = 0, bool Nested = false>
 void print(auto& s) requires requires {s.meta.members;}
 {
     constexpr auto member {s.meta.members.template member_at<I>()};
-    auto& v {reflective_get(s, member)};
+    auto& v {member(s)};
 
     if constexpr(!Nested && I == 0){
         printf("struct %s {", s.meta.name);
@@ -286,11 +286,10 @@ int main()
 
     constexpr auto position {Foo::meta.members.by_name<"position">()};
 
-    for_each(f, [](auto& s, auto i)
+    for_each(f, [](auto& s, auto member)
     {
-        auto& v {i(s)};
-        if constexpr(requires{v + 1;}){
-            printf("member %s has + operator\n", i.name);
+        if constexpr(requires{member(s) + 1;}){
+            printf("member %s has + operator\n", member.name);
         }
     });
 
