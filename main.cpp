@@ -82,7 +82,7 @@ struct Pointer_To_Member
     T type;
 };
 
-template<Pointer_To_Member U, Name n>
+template<Pointer_To_Member U, Name N>
 struct Reflectable
 {
     template<typename T>
@@ -92,7 +92,8 @@ struct Reflectable
     }
     using value_type = decltype(pointer_to_member_type(U.type));
     static constexpr const decltype(U.type) type {U.type};
-    static constexpr const char* name {n.cstr()};
+    static constexpr const char* name {N.cstr()};
+    static constexpr const Name_Const_Char cc_name {N.cstr()};
 };
 
 #define Reflect(name, ...) using meta_tag = name; static constexpr Reflect_Data<meta_tag, #name, __VA_ARGS__> meta{}
@@ -167,6 +168,57 @@ struct Members
             }
 
         }(Ts{}...);
+    }
+
+    template<size_t I, size_t Current = 0>
+    constexpr auto by_index_no_bounds() const
+    {
+        if constexpr(Current >= sizeof...(Ts)){
+            return 0;
+        }
+        else
+        {
+            return []<typename T, typename ...Us>(T t, Us... us)
+            {
+                if constexpr(Current != I){
+                    return Members<Us...>{}.template by_index_no_bounds<I, Current + 1>();
+                }
+                else{
+                    return T{};
+                }
+
+            }(Ts{}...);
+        }
+    }
+
+    template<size_t I>
+    struct Iterator
+    {
+        static constexpr decltype(Members<Ts...>{}.by_index_no_bounds<I>()) member {Members<Ts...>{}.by_index_no_bounds<I>()};
+        constexpr auto operator++()
+        {
+            return Iterator<I + 1>{};
+        }
+
+        constexpr decltype(member)& operator *()
+        {
+            return member;
+        }
+
+        template<size_t J>
+        constexpr bool operator == (Iterator<J>){
+            return I == J;
+        }
+    };
+
+    constexpr auto begin() const
+    {
+        return Iterator<0>{};
+    }
+
+    constexpr auto end() const
+    {
+        return Iterator<sizeof...(Ts) - 1>{};
     }
 };
 
@@ -549,137 +601,145 @@ struct Test
     Reflect(Test, Field(x), Field(y), Field(gold), Field(health));
 };
 
-int main()
+void test_function()
 {
     Foo foo;
-
-    foo.bar = 5;
-    foo.zed = 1;
-    foo.position = {1, 2};
-    foo.heading = {6, 9};
-    foo.origin = {4, 20};
-
-    // get feild data at compile time by name or index
-    constexpr auto position {Foo::meta.members.by_name<"position">()};
-    position(foo).x = 123;
-    position(foo).y = 456;
-
-    printf("position is {%f, %f}\n", foo.position.x, foo.position.y);
-    printf("old origin is {%f, %f}\n", foo.origin.x, foo.origin.y);
-    printf("old zed is %i\n", foo.zed);
-
-    std::string new_origin {"{69, 420}"};
-
-    for_each(foo, [&](auto& object, auto member)
-    {
-        if constexpr(requires{member(object) + 1;}){
-            printf("member %s has + operator\n", member.name);
-        }
-
-        // select members by name at run time
-        if(std::string{"origin"} == member.name)
-        {
-            from_string(&member(object), new_origin);
-            return;
-        }
-        if(std::string{"zed"} == member.name)
-        {
-            from_string(&member(object), std::to_string((int)'z'));
-            return;
-        }
-    });
-
-    printf("new origin is {%f, %f}\n", foo.origin.x, foo.origin.y);
-    printf("new zed is %i\n", foo.zed);
-
-    printf("\npretty print :\n");
-    pretty_printnl(foo);
-    printf("\n");
-    
-    printf("ugly print :\n");
-    ugly_printnl(foo);
-
-    printf("\ncolor from string pretty print :\n");
-
-    std::string some_color {R"({123, 25, 73, 255, "some color"})"};
-    from_string(&foo.background, some_color);
-    pretty_printnl(foo.background);
-
-    printf("\nfoo from string pretty print :\n");
-
-    auto foo_string {to_string(foo)};
-    Foo foo_copy;
-    from_string(&foo_copy, foo_string);
-    pretty_printnl(foo_copy);
-
-    {
-        // creating new structs
-        // creating a soa array from the members
-        // kinda weird way to access the fields though
-
-        auto test_soa {new_soa<10>(Test::meta)};
-
-        {
-            std::vector<int> ints {1, 2, 3, 4, 5};
-
-            ugly_printnl(ints);
-
-            std::string ints_string {R"({420, 69, 322})"};
-            from_string(&ints, ints_string);
-
-            ugly_printnl(ints);
-        }
-
-        {
-            std::string vecs_string {"{{1, 2}, {3, 4}, {5, 6}}"};
-            std::vector<Vec> vecs {};
-            from_string(&vecs, vecs_string);
-            ugly_printnl(vecs);
-        }
-
-        {
-            std::string vecs_int_string {"{}"};
-            std::vector<int> vecs_int {};
-            from_string(&vecs_int, vecs_int_string);
-            ugly_printnl(vecs_int);
-        }
-
-        {
-            std::string vecs_int_string {"{1, 2, 3}"};
-            std::vector<int> vecs_int {};
-            from_string(&vecs_int, vecs_int_string);
-            ugly_printnl(vecs_int);
-        }
-
-        {
-            std::string vecs_int_string {"{{1, 2, 3}, {4, 5, 6}}"};
-            std::vector<std::vector<int>> vecs_int {};
-            from_string(&vecs_int, vecs_int_string);
-            ugly_printnl(vecs_int);
-        }
-
-        {
-            std::string vecs_int_string {"{{{1, 2}, {3, 4}}, {{5, 6, 7}, {9, 10, 11}}, {{100, 200, 300}, {400, 500, 600}}}"};
-            std::vector<std::vector<std::vector<int>>> vecs_int {};
-            from_string(&vecs_int, vecs_int_string);
-            ugly_printnl(vecs_int);
-        }
-
-        printf("\nsoa of %s member names are : ", test_soa.base.meta.name);
-        for(auto m : test_soa.base.meta.members.names){
-            printf("%s ", m);
-        }
-
-        printf("\n");
-
-        {
-            auto x {test_soa.field<"x">()};
-            auto y {test_soa.field<"y">()};
-            auto gold {test_soa.field<"gold">()};
-            auto health {test_soa.field<"health">()};
-            for(auto& g : gold){
-                g = 100;
-            }
-        }
+    for(constexpr auto& m : foo.meta.members){
+        printf("%s\n", m.name);
     }
+}
+
+int main()
+{
+    //Foo foo;
+
+    //foo.bar = 5;
+    //foo.zed = 1;
+    //foo.position = {1, 2};
+    //foo.heading = {6, 9};
+    //foo.origin = {4, 20};
+
+    //// get feild data at compile time by name or index
+    //constexpr auto position {Foo::meta.members.by_name<"position">()};
+    //position(foo).x = 123;
+    //position(foo).y = 456;
+
+    //printf("position is {%f, %f}\n", foo.position.x, foo.position.y);
+    //printf("old origin is {%f, %f}\n", foo.origin.x, foo.origin.y);
+    //printf("old zed is %i\n", foo.zed);
+
+    //std::string new_origin {"{69, 420}"};
+
+    //for_each(foo, [&](auto& object, auto member)
+    //{
+    //    if constexpr(requires{member(object) + 1;}){
+    //        printf("member %s has + operator\n", member.name);
+    //    }
+
+    //    // select members by name at run time
+    //    if(std::string{"origin"} == member.name)
+    //    {
+    //        from_string(&member(object), new_origin);
+    //        return;
+    //    }
+    //    if(std::string{"zed"} == member.name)
+    //    {
+    //        from_string(&member(object), std::to_string((int)'z'));
+    //        return;
+    //    }
+    //});
+
+    //printf("new origin is {%f, %f}\n", foo.origin.x, foo.origin.y);
+    //printf("new zed is %i\n", foo.zed);
+
+    //printf("\npretty print :\n");
+    //pretty_printnl(foo);
+    //printf("\n");
+    //
+    //printf("ugly print :\n");
+    //ugly_printnl(foo);
+
+    //printf("\ncolor from string pretty print :\n");
+
+    //std::string some_color {R"({123, 25, 73, 255, "some color"})"};
+    //from_string(&foo.background, some_color);
+    //pretty_printnl(foo.background);
+
+    //printf("\nfoo from string pretty print :\n");
+
+    //auto foo_string {to_string(foo)};
+    //Foo foo_copy;
+    //from_string(&foo_copy, foo_string);
+    //pretty_printnl(foo_copy);
+
+    //{
+    //    // creating new structs
+    //    // creating a soa array from the members
+    //    // kinda weird way to access the fields though
+
+    //    auto test_soa {new_soa<10>(Test::meta)};
+
+    //    {
+    //        std::vector<int> ints {1, 2, 3, 4, 5};
+
+    //        ugly_printnl(ints);
+
+    //        std::string ints_string {R"({420, 69, 322})"};
+    //        from_string(&ints, ints_string);
+
+    //        ugly_printnl(ints);
+    //    }
+
+    //    {
+    //        std::string vecs_string {"{{1, 2}, {3, 4}, {5, 6}}"};
+    //        std::vector<Vec> vecs {};
+    //        from_string(&vecs, vecs_string);
+    //        ugly_printnl(vecs);
+    //    }
+
+    //    {
+    //        std::string vecs_int_string {"{}"};
+    //        std::vector<int> vecs_int {};
+    //        from_string(&vecs_int, vecs_int_string);
+    //        ugly_printnl(vecs_int);
+    //    }
+
+    //    {
+    //        std::string vecs_int_string {"{1, 2, 3}"};
+    //        std::vector<int> vecs_int {};
+    //        from_string(&vecs_int, vecs_int_string);
+    //        ugly_printnl(vecs_int);
+    //    }
+
+    //    {
+    //        std::string vecs_int_string {"{{1, 2, 3}, {4, 5, 6}}"};
+    //        std::vector<std::vector<int>> vecs_int {};
+    //        from_string(&vecs_int, vecs_int_string);
+    //        ugly_printnl(vecs_int);
+    //    }
+
+    //    {
+    //        std::string vecs_int_string {"{{{1, 2}, {3, 4}}, {{5, 6, 7}, {9, 10, 11}}, {{100, 200, 300}, {400, 500, 600}}}"};
+    //        std::vector<std::vector<std::vector<int>>> vecs_int {};
+    //        from_string(&vecs_int, vecs_int_string);
+    //        ugly_printnl(vecs_int);
+    //    }
+
+    //    printf("\nsoa of %s member names are : ", test_soa.base.meta.name);
+    //    for(auto m : test_soa.base.meta.members.names){
+    //        printf("%s ", m);
+    //    }
+
+    //    printf("\n");
+
+    //    {
+    //        auto x {test_soa.field<"x">()};
+    //        auto y {test_soa.field<"y">()};
+    //        auto gold {test_soa.field<"gold">()};
+    //        auto health {test_soa.field<"health">()};
+    //        for(auto& g : gold){
+    //            g = 100;
+    //        }
+    //    }
+    //}
 }
