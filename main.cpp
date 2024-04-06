@@ -709,6 +709,18 @@ struct Constant
     }
 };
 
+template<auto T>
+struct Exit
+{
+    static constexpr decltype(T) value {T};
+
+    template<auto U>
+    constexpr bool operator == (const Exit<U> e)
+    {
+        return T == e;
+    }
+};
+
 template<size_t I>
 struct CT_Loop
 {
@@ -719,9 +731,14 @@ struct CT_Loop
     {
         constexpr Ret(L l, Inc ic) : c(l), inc(ic){}
 
-        void operator = (auto t)
+        auto operator = (auto t)
         {
-            t.template operator()<I>();
+            _if(requires {t.template operator()<I>() == Exit<true>{};}){
+                return t.template operator()<I>();
+            }
+            else{
+                t.template operator()<I>();
+            }
             constexpr auto iv {decltype(inc.template operator()<I>())::value};
             _if(decltype(c.template operator()<iv>())::value){
                 CT_Loop<iv>{}(c, inc) = t;
@@ -738,6 +755,8 @@ struct CT_Loop
     }
 };
 
+#define _return return Exit<true>{}
+#define _break return Exit<true>{}
 #define _for(init, cond, inc) CT_Loop<[]{\
                                         auto f = [&]<init>()\
                                         {\
