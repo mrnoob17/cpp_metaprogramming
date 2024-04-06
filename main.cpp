@@ -699,58 +699,66 @@ void general_test()
 #define _if(x) if constexpr(x)
 #define _else_if(x) else if constexpr(x)
 
-template<typename T, T ...>
-struct Sequence
-{
-};
-
-template<size_t start, size_t end>
-struct Range
-{
-    template<auto L = start, auto ...P>
-    constexpr auto make_sequence() const
-    {
-        _if(L != end){
-            return make_sequence<L + 1, P..., L>();
-        }
-        else{
-            return Sequence<size_t, P..., L>{};
-        }
-    }
-};
-
 template<auto T>
 struct Constant
 {
-    constexpr operator decltype(T)()
+    static constexpr decltype(T) value {T};
+    constexpr operator auto ()
     {
         return T;
     }
 };
 
-template<size_t start, size_t end>
+template<size_t I>
 struct CT_Loop
 {
-    constexpr CT_Loop(){}
+    constexpr CT_Loop() {}
 
-    template<typename T>
-    constexpr void operator = (T t) 
+    template<typename L, typename Inc>
+    struct Ret
     {
-        t.template operator()<start>();
-        _if(start + 1 < end){
-            CT_Loop<start + 1, end>{} = t;
+        constexpr Ret(L l, Inc ic) : c(l), inc(ic){}
+
+        void operator = (auto t)
+        {
+            t.template operator()<I>();
+            constexpr auto iv {decltype(inc.template operator()<I>())::value};
+            _if(decltype(c.template operator()<iv>())::value){
+                CT_Loop<iv>{}(c, inc) = t;
+            }
         }
+        L c;
+        Inc inc;
+    };
+
+    template<typename C, typename Inc>
+    constexpr auto operator()(C c, Inc inc) 
+    {
+        return Ret<C, Inc>{c, inc};
     }
 };
 
-#define _for(y, s, e) CT_Loop<s, e>{} = [&]<y>() 
+#define _for(init, cond, inc) CT_Loop<[]{\
+                                        auto f = [&]<init>()\
+                                        {\
+                                            Constant<inc> c{};\
+                                            return c;\
+                                        }; \
+                                        auto a {f()};\
+                                        return a.value - (f.template operator()<a.value>() - a.value);\
+                                      }()>{}([&]<init>() {return Constant<cond>{};}, []<init>{return Constant<inc>{};}) = [&]<init>() 
+
+
+
 
 void ct_test()
 {
     Foo foo;
 
-    _for(auto e, 0, 10){
-        printf("%llu", e);
+    _for(int i = 0, i < foo.meta.members.count, i + 1)
+    {
+        const auto m {foo.meta.members.get<i>()};
+        printf("%s\n", m.name);
     };
 }
 
