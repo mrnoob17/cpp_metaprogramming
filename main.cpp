@@ -755,20 +755,45 @@ struct CT_Loop
     }
 };
 
-#define _return return Exit<true>{}
 #define _break return Exit<true>{}
 #define _for(init, cond, inc) CT_Loop<[]{\
-                                        auto f = [&]<init>()\
-                                        {\
-                                            Constant<inc> c{};\
-                                            return c;\
-                                        }; \
-                                        auto a {f()};\
-                                        return a.value - (f.template operator()<a.value>() - a.value);\
-                                      }()>{}([&]<init>() {return Constant<cond>{};}, []<init>{return Constant<inc>{};}) = [&]<init>() 
+                                        auto f = []<init>{constexpr auto v2 {inc}; return v2;};\
+                                        constexpr auto v {f()}; \
+                                        constexpr auto v2 {f.template operator()<v>()}; \
+                                        return v - (v2 - v); \
+                                        }()>{}([&]<init>{return Constant<cond>{};}, []<init>{return Constant<inc>{};}) = [&]<init>
 
+template<typename ...T>
+struct Reconstructed_Struct : T...
+{
+};
 
+#define _member(type, n)  decltype([]{ struct __member {type n;}; return __member{};}())
+//#define _method(n, block)  decltype([]{ struct __member {n block}; return __member{};}())
 
+void rs_test()
+{
+    //auto x = []
+    //{
+    //    struct Member{
+    //        int x; 
+    //    };
+    //    return Member{};
+    //};
+
+    //auto y = []
+    //{
+    //    struct Member{
+    //        int y; 
+    //    };
+    //    return Member{};
+    //};
+
+    Reconstructed_Struct<_member(int, x), _member(int, y)> r {};
+
+    r.x = 0;
+    r.y = 0;
+}
 
 void ct_test()
 {
@@ -783,5 +808,5 @@ void ct_test()
 
 int main()
 {
-    ct_test();
+    rs_test();
 }
