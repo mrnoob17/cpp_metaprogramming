@@ -699,6 +699,21 @@ void general_test()
 #define _if(x) if constexpr(x)
 #define _else_if(x) else if constexpr(x)
 
+template<typename ...T>
+struct Reconstructed_Struct : T...
+{
+};
+
+#define _member(type, n)  decltype([]{ struct __member {type n;}; return __member{};}())
+
+void rs_test()
+{
+    Reconstructed_Struct<_member(int, x), _member(int, y)> r {};
+
+    r.x = 0;
+    r.y = 0;
+}
+
 template<auto T>
 struct Constant
 {
@@ -755,58 +770,122 @@ struct CT_Loop
     }
 };
 
-#define _break return Exit<true>{}
-#define _for(init, cond, inc) CT_Loop<[]{\
-                                        auto f = []<init>{constexpr auto v2 {inc}; return v2;};\
+#define cbreak return Exit<true>{}
+#define cfor(init, cond, inc) CT_Loop<[]{\
+                                        auto f = []<init>{constexpr auto o {inc}; return o;};\
                                         constexpr auto v {f()}; \
                                         constexpr auto v2 {f.template operator()<v>()}; \
                                         return v - (v2 - v); \
                                         }()>{}([&]<init>{return Constant<cond>{};}, []<init>{return Constant<inc>{};}) = [&]<init>
 
-template<typename ...T>
-struct Reconstructed_Struct : T...
-{
-};
-
-#define _member(type, n)  decltype([]{ struct __member {type n;}; return __member{};}())
-//#define _method(n, block)  decltype([]{ struct __member {n block}; return __member{};}())
-
-void rs_test()
-{
-    //auto x = []
-    //{
-    //    struct Member{
-    //        int x; 
-    //    };
-    //    return Member{};
-    //};
-
-    //auto y = []
-    //{
-    //    struct Member{
-    //        int y; 
-    //    };
-    //    return Member{};
-    //};
-
-    Reconstructed_Struct<_member(int, x), _member(int, y)> r {};
-
-    r.x = 0;
-    r.y = 0;
-}
 
 void ct_test()
 {
     Foo foo;
 
-    _for(int i = 0, i < foo.meta.members.count, i + 1)
+    cfor(auto i = 0, i < foo.meta.members.count, i + 1)
     {
-        const auto m {foo.meta.members.get<i>()};
-        printf("%s\n", m.name);
     };
+}
+
+static constexpr const char* FORMAT_SPECIFIERS[] {"%c", "%i", "%u", "%f", "%s", "%p"};
+
+template<typename T>
+consteval auto get_format_specifier(const T&)
+{
+    if constexpr(std::is_same_v<T, char>){
+        return FORMAT_SPECIFIERS[0];
+    }
+    else if constexpr(std::is_floating_point_v<T>){
+        return FORMAT_SPECIFIERS[3];
+    }
+    else if constexpr(std::is_signed_v<T>){
+        return FORMAT_SPECIFIERS[1];
+    }
+    else if constexpr(std::is_unsigned_v<T>){
+        return FORMAT_SPECIFIERS[2];
+    }
+    else if constexpr(std::is_same_v<T, const char*> || std::is_same_v<T, const char[]>){
+        return FORMAT_SPECIFIERS[4];
+    }
+    else if constexpr(std::is_pointer_v<T>){
+        return FORMAT_SPECIFIERS[5];
+    }
+    else
+    {
+        struct Invalid_Specifier{};
+
+        return Invalid_Specifier{};
+    }
+}
+
+template<typename ...T>
+struct Format_String
+{
+    template<size_t N>
+    consteval Format_String(const char (&str)[N])
+    {
+        int ec {0};
+        fmt = str;
+        for(int i = 0; i < N; i++)
+        {
+            if(i > 0 && str[i] == '%' && str[i - 1] != '%'){
+                ec++;
+            }
+        }
+        if(ec < sizeof...(T)){
+            throw "format string element count does not match argument count";
+        }
+    }
+    template<bool nl = false>
+    void format()
+    {
+        constexpr const char* fmts[] {get_format_specifier(T{})...};
+        int ec {0};
+        for(int i = 0; i < fmt.length(); i++)
+        {
+            if(i > 0 && fmt[i] == '%' && fmt[i - 1] != '%')
+            {
+                fmt.replace(i, 1, fmts[ec]);
+                i += std::string_view{fmts[ec]}.length();
+                ec++;
+            }
+        }
+        _if(nl){
+            fmt += '\n';
+        }
+    }
+    std::string fmt;
+};
+
+template<typename ...T>
+void print(std::type_identity_t<Format_String<T...>> fmt, const T&... ts)
+{
+    fmt.format();
+    printf(fmt.fmt.c_str(), ts...);
+}
+
+template<typename ...T>
+void println(std::type_identity_t<Format_String<T...>> fmt, const T&... ts)
+{
+    fmt.template format<true>();
+    printf(fmt.fmt.c_str(), ts...);
 }
 
 int main()
 {
-    rs_test();
+
+    struct Vec
+    {
+        float x;
+        float y;
+    };
+
+    Vec v;
+    v.x = 6;
+    v.y = 9;
+    unsigned int i = 420;
+
+    println("foo % % % % % %", 1, 2, 3, v.x, v.y, i);
+    println("pointer % \n", &i);
 }
