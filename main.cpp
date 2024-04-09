@@ -826,35 +826,54 @@ struct Formatter
     consteval Formatter(const char (&str)[N])
     {
         int ec {0};
-        fmt = str;
         for(int i = 0; i < N; i++)
         {
-            if(i > 0 && str[i] == '%' && str[i - 1] != '%'){
-                ec++;
+            if(i == 0){
+                continue;
+            }
+            if(str[i] == '%' && (i + 1 >= N || str[i + 1] != '%'))
+            {
+                if(str[i - 1] != '%'){
+                    ec++;
+                }
             }
         }
         if(ec < sizeof...(T)){
             throw "format string element count does not match argument count";
         }
+        ptr = str;
     }
     template<bool nl = false>
     void format()
     {
+        fmt = ptr;
         constexpr const char* fmts[] {get_format_specifier(T{})...};
         int ec {0};
         for(int i = 0; i < fmt.length(); i++)
         {
-            if(i > 0 && fmt[i] == '%' && fmt[i - 1] != '%')
+            if(i == 0){
+                continue;
+            }
+            if(fmt[i] == '%' && (i + 1 >= fmt.length() || fmt[i + 1] != '%'))
             {
-                fmt.replace(i, 1, fmts[ec]);
-                i += std::string_view{fmts[ec]}.length();
-                ec++;
+                if(fmt[i - 1] != '%')
+                {
+                    fmt.replace(i, 1, fmts[ec]);
+                    i += std::string_view{fmts[ec]}.length() - 1;
+                    ec++;
+                }
+                else
+                {
+                    fmt.replace(i, 1, "%%");
+                    i += 2;
+                }
             }
         }
         _if(nl){
             fmt += '\n';
         }
     }
+    const char* ptr;
     std::string fmt;
 };
 
@@ -877,7 +896,6 @@ void println(Format_String<T...> fmt, const T&... ts)
 
 int main()
 {
-
     struct Vec
     {
         float x;
@@ -890,5 +908,5 @@ int main()
     unsigned int i = 420;
 
     println("foo % % % % % %", 1, 2, 3, v.x, v.y, i);
-    println("pointer % \n %%", &i);
+    println("pointer % arstarst : %%", &i);
 }
