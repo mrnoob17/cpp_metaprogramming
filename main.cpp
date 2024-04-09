@@ -820,10 +820,10 @@ consteval auto get_format_specifier(const T&)
 }
 
 template<typename ...T>
-struct Format_String
+struct Formatter
 {
     template<size_t N>
-    consteval Format_String(const char (&str)[N])
+    consteval Formatter(const char (&str)[N])
     {
         int ec {0};
         fmt = str;
@@ -859,14 +859,17 @@ struct Format_String
 };
 
 template<typename ...T>
-void print(std::type_identity_t<Format_String<T...>> fmt, const T&... ts)
+using Format_String = std::type_identity_t<Formatter<T...>>;
+
+template<typename ...T>
+void print(Format_String<T...> fmt, const T&... ts)
 {
     fmt.format();
     printf(fmt.fmt.c_str(), ts...);
 }
 
 template<typename ...T>
-void println(std::type_identity_t<Format_String<T...>> fmt, const T&... ts)
+void println(Format_String<T...> fmt, const T&... ts)
 {
     fmt.template format<true>();
     printf(fmt.fmt.c_str(), ts...);
@@ -887,5 +890,5 @@ int main()
     unsigned int i = 420;
 
     println("foo % % % % % %", 1, 2, 3, v.x, v.y, i);
-    println("pointer % \n", &i);
+    println("pointer % \n %%", &i);
 }
