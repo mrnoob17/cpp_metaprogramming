@@ -79,6 +79,15 @@ struct Pointer_To_Member
         type = t;
     }
 
+    template<typename U>
+    constexpr bool operator == (const Pointer_To_Member<U>& m)
+    {
+        if constexpr(std::is_same_v<T, U>){
+            return type == m.type;
+        }
+        return false;
+    }
+
     T type;
 };
 
@@ -91,15 +100,31 @@ struct Reflectable
     {
         return t.*type;
     }
+    static constexpr auto pointer()
+    {
+        return U;
+    }
     using value_type = decltype(pointer_to_member_type(U.type));
     static constexpr const decltype(U.type) type {U.type};
     static constexpr const char* name {N.cstr()};
     static constexpr const Name_Const_Char cc_name {N.cstr()};
 };
 
-#define Reflect(name, ...) using meta_tag = name; static constexpr Reflect_Data<meta_tag, #name, __VA_ARGS__> meta{}
+#define PARENS ()
 
-#define Field(a) Reflectable<&meta_tag::a, #a>
+#define EXPAND(...) EXPAND4(EXPAND4(EXPAND4(EXPAND4(__VA_ARGS__))))
+#define EXPAND4(...) EXPAND3(EXPAND3(EXPAND3(EXPAND3(__VA_ARGS__))))
+#define EXPAND3(...) EXPAND2(EXPAND2(EXPAND2(EXPAND2(__VA_ARGS__))))
+#define EXPAND2(...) EXPAND1(EXPAND1(EXPAND1(EXPAND1(__VA_ARGS__))))
+#define EXPAND1(...) __VA_ARGS__
+
+#define FOR_EACH_MEMBER(...) __VA_OPT__(EXPAND(FOR_EACH_MEMBER_NEXT(__VA_ARGS__)))
+
+#define FOR_EACH_MEMBER_NEXT(a, ...) Reflectable<&meta_tag::a, #a> __VA_OPT__(,) __VA_OPT__(FOR_EACH_MEMBER_NEXT2 PARENS (__VA_ARGS__))
+
+#define FOR_EACH_MEMBER_NEXT2() FOR_EACH_MEMBER_NEXT 
+
+#define Reflect(name, ...) using meta_tag = name; static constexpr Reflect_Data<meta_tag, #name, FOR_EACH_MEMBER(__VA_ARGS__)> meta{}
 
 // this is good enough for now...
 template<typename ...Ts>
@@ -128,7 +153,6 @@ constexpr bool no_duplicate_members()
 template<typename ...Ts> 
 struct Members 
 {
-
     constexpr Members() {}
 
     static constexpr const char* names[sizeof...(Ts)] {Ts{}.name...};
@@ -159,13 +183,13 @@ struct Members
     }
 
     template<size_t I, size_t Current = 0>
-    constexpr auto by_index() const
+    constexpr auto at() const
     {
-        static_assert(Current <= I, "by_index error : index out of bounds");
+        static_assert(Current <= I, "at error : index out of bounds");
         return []<typename T, typename ...Us>(T t, Us... us)
         {
             if constexpr(Current != I){
-                return Members<Us...>{}.template by_index<I, Current + 1>();
+                return Members<Us...>{}.template at<I, Current + 1>();
             }
             else{
                 return T{};
@@ -177,14 +201,14 @@ struct Members
     template<size_t I>
     constexpr auto get() const
     {
-        return by_index<I>(); 
+        return at<I>(); 
     }
 };
 
 template<size_t index = 0>
 constexpr auto for_each(auto& s, auto t)
 {
-    constexpr auto v {s.meta.members.template by_index<index>()};
+    constexpr auto v {s.meta.members.template at<index>()};
     t(s, v);
 
     if constexpr(index + 1 < s.meta.members.count){
@@ -208,9 +232,9 @@ struct RGBA
     float b {5};
     float a {7};
 
-    std::string name {"nameless color"};
+    std::string name {"skyblue"};
 
-    Reflect(RGBA, Field(r), Field(g), Field(b), Field(a), Field(name));
+    Reflect(RGBA, r, g, b, a, name);
 };
 
 struct Vec
@@ -218,7 +242,7 @@ struct Vec
     float x {0};
     float y {0};
 
-    Reflect(Vec, Field(x), Field(y));
+    Reflect(Vec, x, y);
 };
 
 struct Foo
@@ -234,7 +258,13 @@ struct Foo
     RGBA background;
     RGBA highlight;
 
-    Reflect(Foo, Field(bar), Field(zed), Field(position), Field(heading), Field(origin), Field(background), Field(highlight));
+    Reflect(Foo, bar,
+                 zed,
+                 position,
+                 heading,
+                 origin,
+                 background,
+                 highlight);
 };
 
 // naively converts an object to a string
@@ -245,7 +275,7 @@ std::string to_string(const auto& s)
     std::string result;
     if constexpr(requires{s.meta.members;})
     {
-        constexpr auto member {s.meta.members.template by_index<I>()};
+        constexpr auto member {s.meta.members.template at<I>()};
         if constexpr(I == 0){
             result += '{';
         }
@@ -325,7 +355,7 @@ void from_string_helper(auto& s, std::string& str)
             str.erase(0, 1);
         }
 
-        constexpr auto member {s.meta.members.template by_index<I>()};
+        constexpr auto member {s.meta.members.template at<I>()};
         auto& v {member(s)};
         from_string_helper<0, requires{v.meta.members;}>(v, str); 
 
@@ -426,7 +456,7 @@ void pretty_print(auto& s) requires requires {s.meta.members;}
         printf("struct %s {", s.meta.name);
     }
 
-    constexpr auto member {s.meta.members.template by_index<I>()};
+    constexpr auto member {s.meta.members.template at<I>()};
     auto& v {member(s)};
 
     // assuming v can be converted to a string
@@ -460,79 +490,83 @@ struct Empty {};
 template<typename Parent, typename T, size_t S, typename From>
 struct SOA_Base : Parent
 {
-    static constexpr const From  base {From{}};
     static constexpr const char* name {T{}.name};
 
     T::value_type data[S]{};
 
     template<Name N>
-    constexpr auto field() const
-    {
-        if constexpr(name == N)
-        {
-            struct View
-            {
-                constexpr View(const T::value_type* data){
-                    view = data;
-                }
-                constexpr auto& operator[](size_t i) const
-                {
-                    assert(i < S);
-                    return view[i];
-                }
-                constexpr auto begin() const{
-                    return view;
-                }
-                constexpr auto end() const{
-                    return view + S;
-                }
-                constexpr auto raw() const{
-                    return view;
-                }
-                const T::value_type* view {nullptr};
-            };
-            return View{data};
-        }
-        else
-        {
-            const auto i {static_cast<const Parent*>(this)};
-            return i->template field<N>();
-        }
+    constexpr auto field() const{
+        return field_impl<N>();
     }
 
     template<Name N>
+    constexpr auto field(){
+        return field_impl<N>();
+    }
+
+    template<Pointer_To_Member P>
     constexpr auto field()
     {
-        if constexpr(name == N)
-        {
-            struct View
-            {
-                constexpr View(T::value_type* data){
-                    view = data;
-                }
-                constexpr auto& operator[](size_t i)
-                {
-                    assert(i < S);
-                    return view[i];
-                }
-                constexpr auto begin(){
-                    return view;
-                }
-                constexpr auto end(){
-                    return view + S;
-                }
-                constexpr auto raw(){
-                    return view;
-                }
-                T::value_type* view {nullptr};
-            };
-            return View{data};
+        if constexpr(P == T::pointer()){
+            return get_data();
         }
         else
         {
             auto i {static_cast<Parent*>(this)};
-            return i->template field<N>();
+            return i->template field<P>();
         }
+    }
+
+    template<Pointer_To_Member P>
+    constexpr auto field() const
+    {
+        if constexpr(P == T::pointer()){
+            return get_data();
+        }
+        else
+        {
+            auto i {static_cast<Parent*>(this)};
+            return i->template field<P>();
+        }
+    }
+
+    template<Name N>
+    constexpr auto field_impl()
+    {
+        if constexpr(name == N){
+            return get_data();
+        }
+        else
+        {
+            auto i {static_cast<Parent*>(this)};
+            return i->template field_impl<N>();
+        }
+    }
+
+    constexpr auto get_data()
+    {
+        struct View
+        {
+            constexpr View(T::value_type* data){
+                view = data;
+            }
+            constexpr auto& operator[](size_t i)
+            {
+                assert(i < S);
+                return view[i];
+            }
+            constexpr auto begin(){
+                return view;
+            }
+            constexpr auto end(){
+                return view + S;
+            }
+            constexpr auto raw(){
+                return view;
+            }
+            T::value_type* view {nullptr};
+        };
+        return View{data};
     }
 };
 
@@ -546,9 +580,24 @@ constexpr auto new_soa(const Reflect_Data<From, N, Ts...> members)
     {
         return [&]<typename First, typename ...Rest>(First f, Rest ...rs)
         {
-            return new_soa<S, From, N, SOA_Base<T, decltype(Members<Ts...>{}.template by_index<0>()), S, From>, Rest...>(Reflect_Data<From, N, Rest...>{});
+            return new_soa<S, From, N, SOA_Base<T, decltype(Members<Ts...>{}.template at<0>()), S, From>, Rest...>(Reflect_Data<From, N, Rest...>{});
         }(Ts{}...);
     }
+}
+
+template<size_t S>
+constexpr auto create_soa(const auto& from)
+{
+    return new_soa<S>(from.meta);
+}
+
+template<size_t S>
+constexpr auto make_soa(const auto& from)
+{
+    return [&]<typename ...Ts>(const Members<Ts...>&){
+        new_soa<S>(Reflect_Data<decltype(from), from.baked_meta_name, Ts...>{});
+    }(from.meta_members);
+    return new_soa<S>(from.meta);
 }
 
 struct Test
@@ -558,7 +607,7 @@ struct Test
     int gold;
     int health;
 
-    Reflect(Test, Field(x), Field(y), Field(gold), Field(health));
+    Reflect(Test, x, y);
 };
 
 void general_test()
@@ -629,8 +678,6 @@ void general_test()
         // creating a soa array from the members
         // kinda weird way to access the fields though
 
-        auto test_soa {new_soa<10>(Test::meta)};
-
         {
             std::vector<int> ints {1, 2, 3, 4, 5};
 
@@ -676,43 +723,11 @@ void general_test()
             from_string(&vecs_int, vecs_int_string);
             ugly_printnl(vecs_int);
         }
-
-        printf("\nsoa of %s member names are : ", test_soa.base.meta.name);
-        for(auto m : test_soa.base.meta.members.names){
-            printf("%s ", m);
-        }
-
-        printf("\n");
-
-        {
-            auto x {test_soa.field<"x">()};
-            auto y {test_soa.field<"y">()};
-            auto gold {test_soa.field<"gold">()};
-            auto health {test_soa.field<"health">()};
-            for(auto& g : gold){
-                g = 100;
-            }
-        }
     }
 }
 
 #define _if(x) if constexpr(x)
 #define _else_if(x) else if constexpr(x)
-
-template<typename ...T>
-struct Reconstructed_Struct : T...
-{
-};
-
-#define _member(type, n)  decltype([]{ struct __member {type n;}; return __member{};}())
-
-void rs_test()
-{
-    Reconstructed_Struct<_member(int, x), _member(int, y)> r {};
-
-    r.x = 0;
-    r.y = 0;
-}
 
 template<auto T>
 struct Constant
@@ -771,29 +786,23 @@ struct CT_Loop
 };
 
 #define cbreak return Exit<true>{}
-#define cfor(init, cond, inc) CT_Loop<[]{\
-                                        auto f = []<init>{constexpr auto o {inc}; return o;};\
+#define cfor(init, cond, inc) CT_Loop<[&]{\
+                                        constexpr auto f = [&]<init>{constexpr auto o {inc}; return o;};\
                                         constexpr auto v {f()}; \
                                         constexpr auto v2 {f.template operator()<v>()}; \
                                         return v - (v2 - v); \
-                                        }()>{}([&]<init>{return Constant<cond>{};}, []<init>{return Constant<inc>{};}) = [&]<init>
+                                        }()>{}([&]<init>{return Constant<cond>{};}, [&]<init>{return Constant<inc>{};}) = [&]<init>
 
-
-void ct_test()
-{
-    Foo foo;
-
-    cfor(auto i = 0, i < foo.meta.members.count, i + 1)
-    {
-    };
-}
 
 static constexpr const char* FORMAT_SPECIFIERS[] {"%c", "%i", "%u", "%f", "%s", "%p"};
 
 template<typename T>
-consteval auto get_format_specifier(const T&)
+consteval auto get_format_specifier(const T& t)
 {
-    if constexpr(std::is_same_v<T, char>){
+    if constexpr(std::is_same_v<T, const char*> || requires{ t == (const char*){nullptr} ;}){
+        return FORMAT_SPECIFIERS[4];
+    }
+    else if constexpr(std::is_same_v<T, char>){
         return FORMAT_SPECIFIERS[0];
     }
     else if constexpr(std::is_floating_point_v<T>){
@@ -804,9 +813,6 @@ consteval auto get_format_specifier(const T&)
     }
     else if constexpr(std::is_unsigned_v<T>){
         return FORMAT_SPECIFIERS[2];
-    }
-    else if constexpr(std::is_same_v<T, const char*> || std::is_same_v<T, const char[]>){
-        return FORMAT_SPECIFIERS[4];
     }
     else if constexpr(std::is_pointer_v<T>){
         return FORMAT_SPECIFIERS[5];
@@ -828,7 +834,9 @@ struct Formatter
         int ec {0};
         for(int i = 0; i < N; i++)
         {
-            if(i == 0){
+            if(i == 0)
+            {
+                ec++;
                 continue;
             }
             if(str[i] == '%' && (i + 1 >= N || str[i + 1] != '%'))
@@ -851,12 +859,9 @@ struct Formatter
         int ec {0};
         for(int i = 0; i < fmt.length(); i++)
         {
-            if(i == 0){
-                continue;
-            }
-            if(fmt[i] == '%' && (i + 1 >= fmt.length() || fmt[i + 1] != '%'))
+            if(i == 0 || (fmt[i] == '%' && (i + 1 >= fmt.length() || fmt[i + 1] != '%')))
             {
-                if(fmt[i - 1] != '%')
+                if(i == 0 || fmt[i - 1] != '%')
                 {
                     fmt.replace(i, 1, fmts[ec]);
                     i += std::string_view{fmts[ec]}.length() - 1;
@@ -894,19 +899,62 @@ void println(Format_String<T...> fmt, const T&... ts)
     printf(fmt.fmt.c_str(), ts...);
 }
 
-int main()
+template<typename T, Name N, typename ...Ts>
+struct Meta_Data
 {
-    struct Vec
-    {
-        float x;
-        float y;
-    };
+    constexpr Meta_Data() {}
+    using type = T;
+    static constexpr const char* name {N.cstr()};
+    static constexpr Members<Ts...> members;
+};
+
+template<typename T, typename U>
+struct Pair
+{
+    using first_type = T;
+    using second_type = U;
+};
+
+template<Name n, typename ...T>
+struct Meta_Struct_Impl : T::first_type...
+{
+    static constexpr const Name baked_meta_name {n};  
+    static constexpr const char* meta_name {n.cstr()};  
+    static constexpr Members<typename T::second_type...> meta_members {};
+};
+
+#define Meta_Field(type, name) decltype([]{struct _M {type name;}; return Pair<_M, Reflectable<&_M::name, #name>>{};}())
+
+#define Meta_Struct(x, ...) using x = Meta_Struct_Impl<#x, __VA_ARGS__>
+
+Meta_Struct(V2, Meta_Field(float, x),
+                Meta_Field(float, y));
+
+void ct_test()
+{
+    Foo foo;
+    auto soa {create_soa<100>(foo)};
+
+    soa.field<&Foo::position>();
 
     Vec v;
-    v.x = 6;
-    v.y = 9;
-    unsigned int i = 420;
 
-    println("foo % % % % % %", 1, 2, 3, v.x, v.y, i);
-    println("pointer % arstarst : %%", &i);
+    auto soa2 {create_soa<100>(v)};
+
+    soa2.field<"x">()[0] = 69;
+    soa2.field<&Vec::y>()[0] = 420;
+
+    println("% %", soa2.field<&Vec::x>()[0], soa2.field<"y">()[0]);
+
+    cfor(auto i = 0, i < foo.meta.members.count, i + 1)
+    {
+        auto member {foo.meta.members.template at<i>()};
+        println("%", member.name);
+    };
+
+}
+
+int main()
+{
+    ct_test();
 }
