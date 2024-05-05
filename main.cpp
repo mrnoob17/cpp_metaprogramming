@@ -674,10 +674,6 @@ void general_test()
     pretty_printnl(foo_copy);
 
     {
-        // creating new structs
-        // creating a soa array from the members
-        // kinda weird way to access the fields though
-
         {
             std::vector<int> ints {1, 2, 3, 4, 5};
 
@@ -726,9 +722,6 @@ void general_test()
     }
 }
 
-#define _if(x) if constexpr(x)
-#define _else_if(x) else if constexpr(x)
-
 template<auto T>
 struct Constant
 {
@@ -763,14 +756,14 @@ struct CT_Loop
 
         auto operator = (auto t)
         {
-            _if(requires {t.template operator()<I>() == Exit<true>{};}){
+            if constexpr(requires {t.template operator()<I>() == Exit<true>{};}){
                 return t.template operator()<I>();
             }
             else{
                 t.template operator()<I>();
             }
             constexpr auto iv {decltype(inc.template operator()<I>())::value};
-            _if(decltype(c.template operator()<iv>())::value){
+            if constexpr(decltype(c.template operator()<iv>())::value){
                 CT_Loop<iv>{}(c, inc) = t;
             }
         }
@@ -785,13 +778,13 @@ struct CT_Loop
     }
 };
 
-#define cbreak return Exit<true>{}
-#define cfor(init, cond, inc) CT_Loop<[&]{\
+#define breakc return Exit<true>{}
+#define forc(init, cond, inc) CT_Loop<[&]{\
                                         constexpr auto f = [&]<init>{constexpr auto o {inc}; return o;};\
                                         constexpr auto v {f()}; \
                                         constexpr auto v2 {f.template operator()<v>()}; \
                                         return v - (v2 - v); \
-                                        }()>{}([&]<init>{return Constant<cond>{};}, [&]<init>{return Constant<inc>{};}) = [&]<init>
+                                        }()>{}([&]<init>{return Constant<(cond)>{};}, [&]<init>{return Constant<inc>{};}) = [&]<init>
 
 
 static constexpr const char* FORMAT_SPECIFIERS[] {"%c", "%i", "%u", "%f", "%s", "%p"};
@@ -874,7 +867,7 @@ struct Formatter
                 }
             }
         }
-        _if(nl){
+        if constexpr(nl){
             fmt += '\n';
         }
     }
@@ -930,31 +923,15 @@ struct Meta_Struct_Impl : T::first_type...
 Meta_Struct(V2, Meta_Field(float, x),
                 Meta_Field(float, y));
 
-void ct_test()
-{
-    Foo foo;
-    auto soa {create_soa<100>(foo)};
-
-    soa.field<&Foo::position>();
-
-    Vec v;
-
-    auto soa2 {create_soa<100>(v)};
-
-    soa2.field<"x">()[0] = 69;
-    soa2.field<&Vec::y>()[0] = 420;
-
-    println("% %", soa2.field<&Vec::x>()[0], soa2.field<"y">()[0]);
-
-    cfor(auto i = 0, i < foo.meta.members.count, i + 1)
-    {
-        auto member {foo.meta.members.template at<i>()};
-        println("%", member.name);
-    };
-
-}
+using namespace std;
 
 int main()
 {
-    ct_test();
+    tuple t {1, "2", '3'};
+    tuple t2 {4, "5", '6'};
+    int arr[3] {7, 8, 9};
+    forc(int i = 0, i < 3, i + 1)
+    {
+        println("% % %", std::get<i>(t), std::get<i>(t2), arr[i]);
+    };
 }
