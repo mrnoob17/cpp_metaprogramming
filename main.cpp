@@ -71,7 +71,10 @@ struct Name
 };
 
 template <class C, typename U>
-U pointer_to_member_type (U C::*v);
+U pointer_to_member_type(U C::*v);
+
+template <class C, typename U>
+C pointer_to_member_base(U C::*v);
 
 template<typename T>
 struct Pointer_To_Member
@@ -92,7 +95,7 @@ struct Pointer_To_Member
     T type;
 };
 
-template<Pointer_To_Member U, Name N, auto Mix_Type, auto Mix_Pointer_Type>
+template<Pointer_To_Member U, Name N, auto Mix_Type, auto Mix_Pointer_Type, auto Static_Array_Type>
 struct Reflectable
 {
     constexpr Reflectable () {}
@@ -105,8 +108,12 @@ struct Reflectable
     {
         return U;
     }
+    using base = decltype(pointer_to_member_base(U.type));
     using value_type = decltype(pointer_to_member_type(U.type));
-    using value_type_pointer = decltype(pointer_to_member_type(U.type))*;
+    using value_mix_in = decltype(Mix_Type());
+    using value_pointer_mix_in = decltype(Mix_Pointer_Type());
+    template<auto I>
+    using static_array_mix_in = decltype(Static_Array_Type.template operator()<I>());
     static constexpr const decltype(U.type) type {U.type};
     static constexpr const char* name {N.cstr()};
     static constexpr const Name_Const_Char cc_name {N.cstr()};
@@ -126,7 +133,9 @@ struct Reflectable
                                       [](){struct T {\
                                       decltype(pointer_to_member_type(&meta_tag::a)) a;}; return T{};},\
                                       [](){struct T {\
-                                      decltype(pointer_to_member_type(&meta_tag::a))* a;}; return T{};}>\
+                                      decltype(pointer_to_member_type(&meta_tag::a))* a;}; return T{};},\
+                                      []<auto I>(){struct T {\
+                                      decltype(pointer_to_member_type(&meta_tag::a)) a[I];}; return T{};}>\
                                      __VA_OPT__(,) __VA_OPT__(FOR_EACH_MEMBER_NEXT2 PARENS (__VA_ARGS__))
 
 #define FOR_EACH_MEMBER_NEXT2() FOR_EACH_MEMBER_NEXT 
@@ -492,131 +501,6 @@ void ugly_printnl(auto& s)
     printf("\n");
 }
 
-struct Empty {};
-
-template<typename Parent, typename T, size_t S, typename From>
-struct SOA_Base : Parent
-{
-    static constexpr const char* name {T{}.name};
-
-    T::value_type data[S]{};
-
-    template<Name N>
-    constexpr auto field() const{
-        return field_impl<N>();
-    }
-
-    template<Name N>
-    constexpr auto field(){
-        return field_impl<N>();
-    }
-
-    template<Pointer_To_Member P>
-    constexpr auto field()
-    {
-        if constexpr(P == T::pointer()){
-            return get_data();
-        }
-        else
-        {
-            auto i {static_cast<Parent*>(this)};
-            return i->template field<P>();
-        }
-    }
-
-    template<Pointer_To_Member P>
-    constexpr auto field() const
-    {
-        if constexpr(P == T::pointer()){
-            return get_data();
-        }
-        else
-        {
-            auto i {static_cast<Parent*>(this)};
-            return i->template field<P>();
-        }
-    }
-
-    template<Name N>
-    constexpr auto field_impl()
-    {
-        if constexpr(name == N){
-            return get_data();
-        }
-        else
-        {
-            auto i {static_cast<Parent*>(this)};
-            return i->template field_impl<N>();
-        }
-    }
-
-    constexpr auto get_data()
-    {
-        struct View
-        {
-            constexpr View(T::value_type* data){
-                view = data;
-            }
-            constexpr auto& operator[](size_t i)
-            {
-                assert(i < S);
-                return view[i];
-            }
-            constexpr auto begin(){
-                return view;
-            }
-            constexpr auto end(){
-                return view + S;
-            }
-            constexpr auto raw(){
-                return view;
-            }
-            T::value_type* view {nullptr};
-        };
-        return View{data};
-    }
-};
-
-template<size_t S, typename From, Name N, typename T = Empty, typename ...Ts>
-constexpr auto new_soa(const Reflect_Data<From, N, Ts...> members)
-{
-    if constexpr(sizeof...(Ts) == 0){
-        return T{};
-    }
-    else
-    {
-        return [&]<typename First, typename ...Rest>(First f, Rest ...rs)
-        {
-            return new_soa<S, From, N, SOA_Base<T, decltype(Members<Ts...>{}.template at<0>()), S, From>, Rest...>(Reflect_Data<From, N, Rest...>{});
-        }(Ts{}...);
-    }
-}
-
-template<size_t S>
-constexpr auto create_soa(const auto& from)
-{
-    return new_soa<S>(from.meta);
-}
-
-template<size_t S>
-constexpr auto make_soa(const auto& from)
-{
-    return [&]<typename ...Ts>(const Members<Ts...>&){
-        new_soa<S>(Reflect_Data<decltype(from), from.baked_meta_name, Ts...>{});
-    }(from.meta_members);
-    return new_soa<S>(from.meta);
-}
-
-struct Test
-{
-    int x;
-    int y;
-    int gold;
-    int health;
-
-    Reflect(Test, x, y);
-};
-
 void general_test()
 {
     Foo foo;
@@ -940,8 +824,6 @@ struct value_getter<S, E, 128>
     }
 };
 
-#include <tuple>
-
 template<typename T>
 concept baked = requires(T t){t.value;};
 
@@ -1166,21 +1048,44 @@ auto make_widget(auto& e)
     return w;
 };
 
+template<auto I, typename B, typename ...Ts>
+struct soa : Ts::template static_array_mix_in<I>...
+{
+    using base = B;
+    static constexpr decltype(I) count {I};
+    constexpr soa(){}
+};
+
+template<size_t I, typename T> requires requires {T::meta;}
+auto new_soa()
+{
+    return []<typename ...Ts>(const Members<Ts...>&)
+    {
+        return soa<I, T, Ts...>{};
+    }(T::meta.members);
+};
+
 int main()
 {
-    entity e;
-    e.x = 69;
-    e.y = 420;
-    e.name = "deez nuts";
-    widget* w {make_widget(e)};
-    w->show();
-    w->set("x", "69.420");
-    w->show();
-    delete w;
-    dog d;
-    w = make_widget(d);
-    w->show();
-    w->set("age", "5");
-    w->show();
-    delete w;
+    auto s {new_soa<100, dog>()};  
+    s.age[0] = 5;
+
+    auto s2 {new_soa<100, entity>()};  
+    s2.x[0] = 5;
+
+    //entity e;
+    //e.x = 69;
+    //e.y = 420;
+    //e.name = "deez nuts";
+    //widget* w {make_widget(e)};
+    //w->show();
+    //w->set("x", "69.420");
+    //w->show();
+    //delete w;
+    //dog d;
+    //w = make_widget(d);
+    //w->show();
+    //w->set("age", "5");
+    //w->show();
+    //delete w;
 }
