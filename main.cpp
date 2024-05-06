@@ -3,6 +3,7 @@
 #include <string>
 #include <sstream>
 #include <vector>
+#include <cstddef>
 
 struct Name_Const_Char
 {
@@ -91,7 +92,7 @@ struct Pointer_To_Member
     T type;
 };
 
-template<Pointer_To_Member U, Name N>
+template<Pointer_To_Member U, Name N, auto Mix_Type, auto Mix_Pointer_Type>
 struct Reflectable
 {
     constexpr Reflectable () {}
@@ -105,6 +106,7 @@ struct Reflectable
         return U;
     }
     using value_type = decltype(pointer_to_member_type(U.type));
+    using value_type_pointer = decltype(pointer_to_member_type(U.type))*;
     static constexpr const decltype(U.type) type {U.type};
     static constexpr const char* name {N.cstr()};
     static constexpr const Name_Const_Char cc_name {N.cstr()};
@@ -120,7 +122,12 @@ struct Reflectable
 
 #define FOR_EACH_MEMBER(...) __VA_OPT__(EXPAND(FOR_EACH_MEMBER_NEXT(__VA_ARGS__)))
 
-#define FOR_EACH_MEMBER_NEXT(a, ...) Reflectable<&meta_tag::a, #a> __VA_OPT__(,) __VA_OPT__(FOR_EACH_MEMBER_NEXT2 PARENS (__VA_ARGS__))
+#define FOR_EACH_MEMBER_NEXT(a, ...) Reflectable<&meta_tag::a, #a,\
+                                      [](){struct T {\
+                                      decltype(pointer_to_member_type(&meta_tag::a)) a;}; return T{};},\
+                                      [](){struct T {\
+                                      decltype(pointer_to_member_type(&meta_tag::a))* a;}; return T{};}>\
+                                     __VA_OPT__(,) __VA_OPT__(FOR_EACH_MEMBER_NEXT2 PARENS (__VA_ARGS__))
 
 #define FOR_EACH_MEMBER_NEXT2() FOR_EACH_MEMBER_NEXT 
 
@@ -722,6 +729,9 @@ void general_test()
     }
 }
 
+#define _if(x) if constexpr(x)
+#define _else_if(x) else if constexpr(x)
+
 template<auto T>
 struct Constant
 {
@@ -756,14 +766,14 @@ struct CT_Loop
 
         auto operator = (auto t)
         {
-            if constexpr(requires {t.template operator()<I>() == Exit<true>{};}){
+            _if(requires {t.template operator()<I>() == Exit<true>{};}){
                 return t.template operator()<I>();
             }
             else{
                 t.template operator()<I>();
             }
             constexpr auto iv {decltype(inc.template operator()<I>())::value};
-            if constexpr(decltype(c.template operator()<iv>())::value){
+            _if(decltype(c.template operator()<iv>())::value){
                 CT_Loop<iv>{}(c, inc) = t;
             }
         }
@@ -867,7 +877,7 @@ struct Formatter
                 }
             }
         }
-        if constexpr(nl){
+        _if(nl){
             fmt += '\n';
         }
     }
@@ -892,46 +902,285 @@ void println(Format_String<T...> fmt, const T&... ts)
     printf(fmt.fmt.c_str(), ts...);
 }
 
-template<typename T, Name N, typename ...Ts>
-struct Meta_Data
+#include <type_traits>
+
+template<auto S, auto E>
+struct sequence;
+
+template<auto E>
+struct sequence<E, E>
 {
-    constexpr Meta_Data() {}
-    using type = T;
-    static constexpr const char* name {N.cstr()};
-    static constexpr Members<Ts...> members;
+    static constexpr bool iter {true};
 };
 
-template<typename T, typename U>
-struct Pair
+template<auto S, auto E, auto C = 0>
+struct value_getter
 {
-    using first_type = T;
-    using second_type = U;
+    constexpr value_getter() {}
+    constexpr auto get(const int n)
+    {
+        if(C == n)
+        {
+            constexpr auto k {C};
+            return k;
+        }
+        else{
+            return value_getter<S, E, C + 1>{}.get(n);
+        }
+    }
 };
 
-template<Name n, typename ...T>
-struct Meta_Struct_Impl : T::first_type...
+template<auto S, auto E>
+struct value_getter<S, E, 128>
 {
-    static constexpr const Name baked_meta_name {n};  
-    static constexpr const char* meta_name {n.cstr()};  
-    static constexpr Members<typename T::second_type...> meta_members {};
+    constexpr value_getter() {}
+    constexpr auto get(const int n)
+    {
+        return 128;
+    }
 };
 
-#define Meta_Field(type, name) decltype([]{struct _M {type name;}; return Pair<_M, Reflectable<&_M::name, #name>>{};}())
+#include <tuple>
 
-#define Meta_Struct(x, ...) using x = Meta_Struct_Impl<#x, __VA_ARGS__>
+template<typename T>
+concept baked = requires(T t){t.value;};
 
-Meta_Struct(V2, Meta_Field(float, x),
-                Meta_Field(float, y));
+template<auto S, auto E>
+struct sequence : sequence<S + 1, E>
+{
+    static constexpr bool iter {false};
+    static constexpr decltype(S) value {S};
+    using next = sequence<S + 1, E>;
+    struct iterator
+    {
+        decltype(S) current;
+        constexpr iterator(auto n) : current(n)
+        {
+        }
+        constexpr auto operator*()
+        {
+            //if constexpr(C == S)
+            //{
+            //    constexpr Constant<C> it;
+            //    return it;
+            //}
+            //else if constexpr(C < E){
+            //    return this->operator*<C + 1>();
+            //}
+        }
+        //template<>
+        //constexpr auto operator*<128>()
+        //{
+        //    constexpr Constant<128> it;
+        //    return it;
+        //}
+        template<auto I = S>
+        void operator++()
+        {
+            return this->operator++<I + 1>();
+        }
+        template<>
+        void operator++<E>()
+        {
+            return;
+        }
+        constexpr bool operator == (const auto m){
+            return false;
+        }
+        sequence<S, E> pointer;
+    };
+    constexpr auto begin()
+    {
+        return iterator{S};
+    }
+    constexpr auto end()
+    {
+        return iterator{E};
+    }
+};
+
+struct foo
+{
+    static constexpr int const arr []{1, 2, 3, 4, 5};
+    template<auto counter>
+    struct iterator
+    {
+        consteval int operator* ()
+        {
+            int p;
+            counter(&p);
+            return p;
+        }
+        constexpr void operator++()
+        {
+        }
+    };
+    constexpr auto begin()
+    {
+        return iterator<[]<auto c = 1>(int* p) consteval {
+            if(p){
+                *p = c;
+            }
+            return c;
+        }>{};
+    }
+    constexpr auto end()
+    {
+        return iterator<[]<auto c = 1>(int* p) consteval {
+            if(p){
+                *p = c;
+            }
+            return c;
+        }>{};
+    }
+};
+
+template<size_t I>
+struct tuple_index{
+    static constexpr size_t value {I};
+};
+
+template<typename ...Ts>
+struct tuple;
+
+template<>
+struct tuple<>{};
+
+template<typename T, typename ...Ts>
+struct tuple<T, Ts...> : tuple<Ts...>
+{
+    constexpr tuple(const T& t, const Ts& ...ts)
+    {
+        value = t;
+        ((tuple<Ts...>::value = ts),...);
+    }
+
+    constexpr tuple(){}
+
+    T value {};
+
+    template<size_t I, size_t C = 0>
+    constexpr auto& get() const
+    {
+        if constexpr(C == I){
+            return value;
+        }
+        else
+        {
+            auto c {static_cast<const tuple<Ts...>*>(this)};
+            return c->template get<I, C + 1>();
+        }
+    };
+
+    template<size_t I, size_t C = 0>
+    constexpr auto pointer() const
+    {
+        if constexpr(C == I)
+        {
+            const void* c {&value};
+            return static_cast<const char*>(c);
+        }
+        else
+        {
+            auto c {static_cast<const tuple<Ts...>*>(this)};
+            return c->template get<I, C + 1>();
+        }
+    };
+};
+
+template<typename T, typename ...Ts>
+tuple(T, Ts...) -> tuple<T, Ts...>;
+
+#include <string>
+#include <sstream>
 
 using namespace std;
 
+struct entity
+{
+    float x;
+    float y;
+
+    string name;
+
+    Reflect(entity, x, y, name);
+};
+
+struct dog
+{
+    int age {0};
+    string owner {"tkap"};
+    string shelter_name {"deez nuts sanctuary"};
+    Reflect(dog, age, owner, shelter_name);
+};
+
+struct widget
+{
+    vector<void*> values;
+    virtual void show() = 0;
+    virtual void set(const string&, const string&) = 0;
+    virtual ~widget() = default;
+};
+
+template<Members M>
+struct widget_internal : widget
+{
+    static constexpr decltype(M) members {M};
+    void show()
+    {
+        forc(auto i = 0, i < members.count, i + 1)
+        {
+            auto m {members.template get<i>()};
+            using type = decltype(m)::value_type;
+            printf("member %s = %s\n", m.name, to_string(*(type*)values[i]).c_str());
+        };
+    }
+    void set(const string& s, const string& s2)
+    {
+        bool found {false};
+        forc(auto i = 0, i < members.count, i + 1)
+        {
+            auto m {members.template get<i>()};
+            if(m.name == s)
+            {
+                using type = decltype(m)::value_type;
+                stringstream ss {s2};
+                ss>>*(type*)values[i];
+                found = true;
+            }
+        };
+        if(!found){
+            assert(false);
+        }
+    }
+};
+
+auto make_widget(auto& e)
+{
+    auto w {new widget_internal<e.meta.members>{}};
+    forc(auto i = 0, i < e.meta.members.count, i + 1)
+    {
+        auto m {e.meta.members.template get<i>()};
+        w->values.push_back(&m(e));
+    };
+    return w;
+};
+
 int main()
 {
-    tuple t {1, "2", '3'};
-    tuple t2 {4, "5", '6'};
-    int arr[3] {7, 8, 9};
-    forc(int i = 0, i < 3, i + 1)
-    {
-        println("% % %", std::get<i>(t), std::get<i>(t2), arr[i]);
-    };
+    entity e;
+    e.x = 69;
+    e.y = 420;
+    e.name = "deez nuts";
+    widget* w {make_widget(e)};
+    w->show();
+    w->set("x", "69.420");
+    w->show();
+    delete w;
+    dog d;
+    w = make_widget(d);
+    w->show();
+    w->set("age", "5");
+    w->show();
+    delete w;
 }
