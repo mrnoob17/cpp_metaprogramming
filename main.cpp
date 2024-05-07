@@ -402,7 +402,7 @@ void pretty_print(auto& s)
     }
 }
 
-void pretty_printnl(auto& s) requires requires {s.meta;}
+void pretty_printnl(auto& s)
 {
     pretty_print(s);
     printf("\n");
