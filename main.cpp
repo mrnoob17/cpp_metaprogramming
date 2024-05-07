@@ -167,17 +167,17 @@ struct reflectable
 #define FOR_EACH_MEMBER(...) __VA_OPT__(EXPAND(FOR_EACH_MEMBER_NEXT(__VA_ARGS__)))
 
 #define FOR_EACH_MEMBER_NEXT(a, ...) reflectable<&meta_tag::a, #a,\
-                                      [](){struct T {\
+                                      []{struct T {\
                                       decltype(pointer_to_member_type(&meta_tag::a)) a;}; return T{};},\
-                                      [](){struct T {\
+                                      []{struct T {\
                                       decltype(pointer_to_member_type(&meta_tag::a))* a;}; return T{};},\
-                                      []<auto I>(){struct T {\
+                                      []<auto I>{struct T {\
                                       decltype(pointer_to_member_type(&meta_tag::a)) a[I];}; return T{};}>\
                                      __VA_OPT__(,) __VA_OPT__(FOR_EACH_MEMBER_NEXT2 PARENS (__VA_ARGS__))
 
 #define FOR_EACH_MEMBER_NEXT2() FOR_EACH_MEMBER_NEXT 
 
-#define Reflect(name, ...) using meta_tag = name; static constexpr reflect_data<meta_tag, #name, FOR_EACH_MEMBER(__VA_ARGS__)> meta{}
+#define Reflect(name, ...) using meta_tag = name; static constexpr meta_data<meta_tag, #name, FOR_EACH_MEMBER(__VA_ARGS__)> meta{}
 
 template<typename ...Ts>
 consteval bool has_duplicate_members()
@@ -285,9 +285,9 @@ constexpr auto for_each(auto& s, auto t)
 }
 
 template<typename T, baked_name N, typename ...Ts>
-struct reflect_data
+struct meta_data
 {
-    constexpr reflect_data() {}
+    constexpr meta_data() {}
     using type = T;
     static constexpr const char* name {N.cstr()};
     static constexpr reflect_members<Ts...> members;
@@ -539,12 +539,12 @@ int main()
     e.x = 69;
     e.y = 420;
     e.name = "arnold";
-    printf("%s\n", string_builder(e).c_str());
+    ugly_printnl(e);
 
     dog d;
     d.age = 2;
     d.owner = "erika";
     d.shelter_name = "street dog sanctuary";
 
-    pretty_print(d);
+    pretty_printnl(d);
 }
